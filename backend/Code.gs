@@ -16,7 +16,7 @@
 // ============================================================
 
 const CONFIG = {
-  SPREADSHEET_ID: 'PASTE_YOUR_SPREADSHEET_ID_HERE',
+  SPREADSHEET_ID: '1bY2_I44g5bI0Gfwnn-I_7zD8HouhoH1ZOgXMneBvdHA',
   SHEETS: {
     sales: 'Sales',
     products: 'Products',
