@@ -147,5 +147,5 @@ The dashboard is a static HTML file — no server needed:
 ```
 backend/Code.gs        Apps Script API (paste into script.google.com)
 prototype/             Canva prototype (Balooo.dc.html + support.js)
-index.html             (coming) production dashboard wired to the API
+index.html             production dashboard — all six screens wired to the API
 ```
