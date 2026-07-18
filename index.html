@@ -523,7 +523,7 @@ var App = {
   renderOverview: function(cur, prev, W){
     var el = document.getElementById('scr-ov');
     if (!cur.length){
-      el.innerHTML = '<div class="empty"><b>No sales rows in this window.</b> Add rows to the <span class="mono">Sales</span> tab — one per week × brand × channel × category × collection × geo — and hit Refresh data.</div>';
+      el.innerHTML = '<div class="empty"><b>No sales rows in this window.</b> Add rows to the <span class="mono">REVENUE</span> tab — one per week × brand × channel × category × collection × geo — and hit Refresh data.</div>';
       return;
     }
     var self = this;
@@ -594,11 +594,11 @@ var App = {
     var kpis = [
       mk('Revenue', fmtMoney(rev), deltaPct(rev,revP), revSeries, 'vs '+fmtMoney(revP)+' prior'),
       mk('Units sold', fmtNum(units), deltaPct(units,unitsP), unitSeries, 'across all rows in window'),
-      mk('Orders', orders?fmtNum(orders):'—', deltaPct(orders,ordersP), chSeries('orders'), orders?'from Channels tab':'add Channels rows'),
+      mk('Orders', orders?fmtNum(orders):'—', deltaPct(orders,ordersP), chSeries('orders'), orders?'from CHANNELS tab':'add CHANNELS rows'),
       mk('Avg order value', aov?fmtMoney(aov):'—', deltaPct(aov,aovP), [], 'revenue ÷ orders'),
       mk('Discount given', fmtMoney(disc), deltaPct(disc,discP), [], rev? fmtPct(disc/(rev+disc))+' of gross' : '', true),
       mk('Return rate', units?fmtPct(rets/units):'—', deltaPct(units?rets/units:0, unitsP?retsP/unitsP:0), retSeries, Math.round(rets)+' units back', true),
-      mk('New customers', newC?fmtNum(newC):'—', deltaPct(newC,newCP), chSeries('newcustomers'), newC?'from Channels tab':'add Channels rows'),
+      mk('New customers', newC?fmtNum(newC):'—', deltaPct(newC,newCP), chSeries('newcustomers'), newC?'from CHANNELS tab':'add CHANNELS rows'),
       mk('Ad spend', spend?fmtMoney(spend):'—', deltaPct(spend,spendP), [], spend&&rev? 'ROAS '+(rev/spend).toFixed(1)+'×':'', true)
     ].join('');
 
@@ -692,7 +692,7 @@ var App = {
       +'</div>'
 
       +'<div class="card" style="margin-top:14px"><h3>Action board</h3>'
-      +'<div class="sub">Every alert can become an action. This board is the Monday meeting — it reads and writes the <span class="mono">Actions</span> tab.</div>'
+      +'<div class="sub">Every alert can become an action. This board is the Monday meeting — it reads and writes the <span class="mono">ALERTS</span> tab.</div>'
       + boardHtml
       +'</div>';
 
@@ -783,7 +783,7 @@ var App = {
   renderBrands: function(cur, prev, W){
     var el = document.getElementById('scr-bp'), self = this;
     var brands = uniq(this.data.sales,'brand');
-    if (!brands.length){ el.innerHTML = '<div class="empty">Add rows to the <span class="mono">Sales</span> tab to see brand scorecards.</div>'; return; }
+    if (!brands.length){ el.innerHTML = '<div class="empty">Add rows to the <span class="mono">REVENUE</span> tab to see brand scorecards.</div>'; return; }
 
     var cards = brands.map(function(b, bi){
       var meta = self.brandCols[b]||{col:INK, wash:'#EFEDE6', tag:''};
@@ -895,7 +895,7 @@ var App = {
       +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:14px">'+cards+'</div>'
       +'<div class="card" style="margin-top:14px">'
       +'<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:10px">'
-      +'<div><h3>Gross margin, week by week</h3><div class="sub">Estimated from Products price/cost per category, less half of discounts — the distance between the lines is the strategy conversation</div></div>'
+      +'<div><h3>Gross margin, week by week</h3><div class="sub">Estimated from INVENTORY price/cost per category, less half of discounts — the distance between the lines is the strategy conversation</div></div>'
       +'<div style="display:flex;gap:14px;align-items:center">'+mLgd+'</div></div>'
       +'<svg viewBox="0 0 800 180" preserveAspectRatio="none" style="width:100%;height:170px;display:block;margin-top:12px">'
       +'<line x1="0" y1="45" x2="800" y2="45" stroke="#F1EFE8"/><line x1="0" y1="90" x2="800" y2="90" stroke="#F1EFE8"/><line x1="0" y1="135" x2="800" y2="135" stroke="#F1EFE8"/><line x1="0" y1="179" x2="800" y2="179" stroke="#E6E3DA"/>'
@@ -916,9 +916,9 @@ var App = {
       return true;
     });
     var head = '<div class="screenhead"><div class="kicker">03 · Product &amp; inventory</div><h2>What to restock, what to mark down</h2></div>'
-      +'<p class="read">Stock is money wearing clothes. This screen pairs what is selling (Sales tab) with what is sitting (Products tab).</p>';
+      +'<p class="read">Stock is money wearing clothes. This screen pairs what is selling (REVENUE tab) with what is sitting (INVENTORY tab).</p>';
     if (!prods.length){
-      el.innerHTML = head + '<div class="empty">Add rows to the <span class="mono">Products</span> tab — one per SKU with Price, Cost, Stock and ReorderLevel — to light this screen up.</div>';
+      el.innerHTML = head + '<div class="empty">Add rows to the <span class="mono">INVENTORY</span> tab — one per SKU with unit_price, unit_cost, quantity_on_hand and reorder_level — to light this screen up.</div>';
       return;
     }
 
@@ -1111,7 +1111,7 @@ var App = {
     var geoHtml = geoKeys.map(function(g){
       var d = fmtDelta(deltaPct(geo[g], geoP[g]||0));
       return '<div style="display:grid;grid-template-columns:140px 1fr auto auto;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--linesoft)"><span style="font-size:12px;font-weight:500">'+esc(g)+'</span><div class="bar"><div style="width:'+(geo[g]/geoMax*100).toFixed(0)+'%;background:var(--ink)"></div></div><span class="mono" style="font-size:11px;font-variant-numeric:tabular-nums">'+fmtMoney(geo[g])+'</span><span class="delta" style="color:'+d.c+';min-width:52px;text-align:right">'+d.t+'</span></div>';
-    }).join('') || '<div style="font-size:12px;color:var(--mute)">Add a Geo column value in Sales rows.</div>';
+    }).join('') || '<div style="font-size:12px;color:var(--mute)">Add a geography column value in REVENUE rows.</div>';
 
     // middle band: real split if CHANNELS carries it, else the CUSTOMERS cohort table
     var midGrid;
@@ -1154,9 +1154,9 @@ var App = {
     var el = document.getElementById('scr-ct'), self = this;
     var comps = this.data.competitors;
     var head = '<div class="screenhead"><div class="kicker">05 · Competition tracker</div><h2>Who\'s discounting, launching and restocking around us</h2></div>'
-      +'<p class="read">Everything here comes from the Competitors tab — one row per thing you spot in the market.</p>';
+      +'<p class="read">Everything here comes from the COMPETITORS tab — one row per thing you spot in the market.</p>';
     if (!comps.length){
-      el.innerHTML = head + '<div class="empty">Add rows to the <span class="mono">Competitors</span> tab: Date, Competitor, Type (Launch / Price / Campaign / Store / Collab), Title, Detail, PricePoint, Channel, Link.</div>';
+      el.innerHTML = head + '<div class="empty">Add rows to the <span class="mono">COMPETITORS</span> tab: date, competitor, type (Launch / Price / Campaign / Store / Collab), title, detail, price_point, channel, link.</div>';
       return;
     }
     // window = same date span as sales window (or last 90 days if no sales)
@@ -1220,9 +1220,9 @@ var App = {
     var el = document.getElementById('scr-iw'), self = this;
     var rows = this.data.industry;
     var head = '<div class="screenhead"><div class="kicker">06 · Industry watch</div><h2>Where fashion is drifting — and what that means for us</h2></div>'
-      +'<p class="read">Fed by the Industry tab — point an IMPORTRANGE at your Loomline Trend Radar sheet and this fills itself.</p>';
+      +'<p class="read">Fed by the INDUSTRY tab — point an IMPORTRANGE at your Loomline Trend Radar sheet and this fills itself.</p>';
     if (!rows.length){
-      el.innerHTML = head + '<div class="empty">The <span class="mono">Industry</span> tab is empty. Either paste rows (Date, Title, Source, Category, Sentiment, Score, Insight, Link) or IMPORTRANGE them from the Loomline spreadsheet.</div>';
+      el.innerHTML = head + '<div class="empty">The <span class="mono">INDUSTRY</span> tab is empty. Either paste rows (date, title, source, category, sentiment, score, insight, link) or IMPORTRANGE them from the Loomline spreadsheet.</div>';
       return;
     }
     var sorted = rows.slice().sort(function(a,b){return (b._date||0)-(a._date||0);});
