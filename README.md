@@ -6,141 +6,145 @@ HTML dashboard (hosted on your own domain) is the front end.
 
 ```
 You / your team          Google Sheet              Apps Script            Your domain
-enter weekly data  --->  7 tabs, 1 table    --->   doGet() reads    --->  dashboard fetches
+enter weekly data  --->  8 tabs, 1 table    --->   doGet() reads    --->  dashboard fetches
 (or import CSVs)         per function              tabs, returns JSON     JSON + renders
 ```
 
-This is the same architecture as Loomline (fashion intelligence), so the two
-apps stay consistent — and the **Industry** tab here can be fed straight from
-Loomline's Trend Radar sheet.
+- Spreadsheet: `1bY2_I44g5bI0Gfwnn-I_7zD8HouhoH1ZOgXMneBvdHA`
+- Web app: deployed from `backend/Code.gs` (Deploy → Manage deployments → New version after every code change)
 
 ---
 
-## The spreadsheet: 7 tabs
+## The spreadsheet: 8 tabs (+3 optional)
 
-One spreadsheet, one tab per function. Every tab is a clean table: row 1 is
-headers, each row below is one record. No merged cells, no totals rows (the
-dashboard computes totals), no blank header columns.
+Every tab is a clean table: row 1 = headers (snake_case), one record per row.
+No merged cells, no totals rows, no formulas-as-data — the dashboard does the math.
 
-### 1. `Sales` — the core table (powers Overview + Brand Performance)
+### MASTER — config (1 row)
 
-One row per **week × brand × channel × category × collection × geo** combination.
-This one table answers every filter in the dashboard.
+| last_updated | brands | fiscal_start_month | currency |
+|---|---|---|---|
+| 18/07/2026 | 2 | 4 | INR |
 
-| Week | Brand | Channel | Category | Collection | Geo | Units | Revenue | Discount | Returns |
-|------|-------|---------|----------|------------|-----|-------|---------|----------|---------|
-| 2026-07-13 | The Hullabalooo | Website | Dresses | SS26 | Mumbai | 42 | 189000 | 12000 | 2 |
+### BRANDS — reference (1 row per brand)
 
-- **Week**: Monday of the week (date format). Weekly, not daily — daily is
-  more typing for no dashboard benefit.
-- **Brand**: exactly `The Hullabalooo` or `The Pappy Show` (use Data Validation
-  dropdowns so spellings never drift).
-- **Channel**: Website / Marketplace / Retail / Popup / Wholesale — your call,
-  but fix the list with a dropdown.
-- Only add rows for combinations that had sales. Empty = zero.
+| brand_id | brand_name | color_primary | status |
+|---|---|---|---|
+| HB | The Hullabalooo | #A13E63 | Active |
+| PS | The Pappy Show | #2F6D77 | Active |
 
-### 2. `Products` — SKU master + inventory (powers Product & Inventory)
+`brand_id` is what every other tab uses; the API resolves it to the name.
+`color_primary` colours that brand everywhere in the dashboard.
 
-One row per SKU.
+### REVENUE — weekly actuals (the core table)
 
-| SKU | Product | Brand | Category | Collection | Price | Cost | Stock | ReorderLevel | Status |
-|-----|---------|-------|----------|------------|-------|------|-------|--------------|--------|
+One row per **week × brand × channel × category × collection × geography**
+that had sales. Only combinations that sold — absent = zero.
 
-`Status`: Active / Low stock / Out of stock / Discontinued. Update `Stock`
-weekly (or connect your inventory export later).
+| date | brand_id | channel | category | collection | geography | revenue | units_sold |
+|---|---|---|---|---|---|---|---|
+| 13/07/2026 | HB | Website | Dresses | Core | Mumbai | 189000 | 42 |
+| 13/07/2026 | HB | Marketplace | Dresses | Core | Delhi NCR | 96500 | 21 |
+| 13/07/2026 | PS | Marketplace | Tees | New Season | Bangalore | 61200 | 44 |
 
-### 3. `Channels` — weekly channel & customer metrics (powers Customer & Channel)
+- `date`: the **Monday of the week**, as a real date cell.
+- `revenue` in ₹, plain number (no ₹, no commas).
+- Keep channel/category/collection/geography vocabularies fixed with
+  Data Validation dropdowns.
 
-One row per week × brand × channel.
+### COSTS — operating expenses
 
-| Week | Brand | Channel | Sessions | Orders | NewCustomers | ReturningCustomers | AOV | AdSpend |
-|------|-------|---------|----------|--------|--------------|--------------------|-----|---------|
+One row per cost entry (weekly or monthly, as you incur them).
 
-Sessions = site visits / footfall / marketplace views, whichever fits the
-channel. AdSpend here lets the dashboard compute ROAS per channel.
+| date | brand_id | cost_category | department | amount |
+|---|---|---|---|---|
+| 15/07/2026 | HB | Marketing | Growth | 250000 |
+| 01/07/2026 | PS | Salaries | Ops | 400000 |
+| 10/07/2026 | HB | Logistics | Fulfilment | 85000 |
 
-### 4. `Competitors` — powers Competition Tracker
+Feeds "Operating costs" and "Est. operating profit" on the Brands screen.
 
-One row per observation (a launch, a price change, a campaign you spotted).
+### INVENTORY — SKU-level stock
 
-| Date | Competitor | Type | Title | Detail | PricePoint | Channel | Link |
-|------|-----------|------|-------|--------|------------|---------|------|
+One row per SKU. Update `quantity_on_hand` weekly.
 
-`Type`: Launch / Price / Campaign / Store / Collab.
+| sku | brand_id | quantity_on_hand | reorder_level | unit_cost | warehouse |
+|---|---|---|---|---|---|
+| HB-DRS-001 | HB | 4 | 10 | 1500 | Mumbai |
+| PS-TEE-014 | PS | 0 | 15 | 420 | Delhi |
 
-### 5. `Industry` — powers Industry Watch
+Optional extra columns the dashboard also understands:
+`product_name`, `category`, `collection`, `unit_price` (selling price — add it
+to get real margin numbers instead of estimates), `status`
+(Active / Discontinued).
 
-Same shape as Loomline's Trend Radar `Data` sheet, so you can either
-copy rows across or point an `IMPORTRANGE` at the Loomline spreadsheet
-and get the feed for free:
+### CHANNELS — platform performance
 
-| Date | Title | Source | Category | Sentiment | Score | Insight | Link |
-|------|-------|--------|----------|-----------|-------|---------|------|
+One row per **date × channel**, from your ad/platform reports.
 
-### 6. `Actions` — the action board (read **and written** by the app)
+| date | channel_name | impressions | clicks | conversions | cost |
+|---|---|---|---|---|---|
+| 13/07/2026 | Instagram | 120000 | 5400 | 130 | 35000 |
+| 13/07/2026 | Website | 40000 | 8000 | 210 | 15000 |
 
-| ID | Title | Owner | Due | Source | Status | Created |
-|----|-------|-------|-----|--------|--------|---------|
+`channel_name` must use the same vocabulary as REVENUE's `channel` so the
+dashboard can join them (revenue + conversion + ROAS in one table).
 
-`Status`: To do / In progress / Done. The dashboard writes here via POST —
-don't reorder these columns.
+### CUSTOMERS — monthly cohorts
 
-### 7. `Targets` — monthly targets (powers "vs plan" deltas)
+One row per month of first-time buyers.
 
-| Month | Brand | RevenueTarget | UnitsTarget | NewCustomersTarget |
-|-------|-------|---------------|-------------|--------------------|
+| cohort_month | new_customers | repeat_rate | avg_ltv | acquisition_cost |
+|---|---|---|---|---|
+| 01/06/2026 | 380 | 0.31 | 6100 | 780 |
+| 01/05/2026 | 410 | 0.26 | 5600 | 850 |
 
----
+- `repeat_rate`: fraction (0.31) or percent (31) — both work.
+- Powers the cohort table and LTV:CAC health check.
 
-## Rules that keep this painless
+### ALERTS — action items (read **and written** by the app)
 
-1. **The sheet is the database, the dashboard does the math.** Never put
-   formulas, totals, or % rows in the tabs — enter raw facts only.
-2. **Lock the vocabulary.** Data Validation dropdowns on Brand, Channel,
-   Category, Collection, Geo, Status. One misspelled "Hulabalooo" splits
-   your charts in two.
-3. **Weekly cadence.** One 20-minute Friday session filling Sales + Channels
-   beats daily entry. Products/Competitors update as things happen.
-4. **Don't split into multiple spreadsheets.** One file, seven tabs. Apps
-   Script opens it once; everything stays in sync.
+| title | owner | status | action_required | due_date |
+|---|---|---|---|---|
+| Reorder HB-DRS-001 | Vinay | To do | Stock below reorder level | 25/07/2026 |
 
----
+`status`: To do / In progress / Done. The dashboard's Action board moves
+cards by rewriting this column. Optional: add an `id` column (leave it blank;
+the app fills it) for more robust matching.
 
-## Backend setup (`backend/Code.gs`)
+### Optional tabs — add later, the dashboard picks them up automatically
 
-1. Create the Google Sheet with the 7 tabs above; copy its ID from the URL.
-2. [script.google.com](https://script.google.com) → New project → paste
-   `Code.gs` → set `SPREADSHEET_ID` in CONFIG.
-3. Project Settings → Script Properties → add `ANTHROPIC_API_KEY` (for the
-   Ask feature; optional).
-4. Deploy → New deployment → **Web app** → Execute as *Me*, access
-   *Anyone* → copy the `/exec` URL.
-5. Test: open `<url>?mode=all` in a browser — you should see JSON.
-
-### API
-
-| Call | Returns |
-|------|---------|
-| `GET ?mode=all` | every table in one payload (dashboard startup) |
-| `GET ?mode=sales` (or products / channels / competitors / industry / actions / targets) | one table |
-| `POST {action:'ask', prompt}` | Claude answer |
-| `POST {action:'addAction', card}` | new action-board card |
-| `POST {action:'updateAction', id, status}` | move a card |
+- **COMPETITORS**: `date, competitor, type, title, detail, price_point, channel, link`
+  (`type`: Launch / Price / Campaign / Store / Collab) → screen 05.
+- **INDUSTRY**: `date, title, source, category, sentiment, score, insight, link`
+  — IMPORTRANGE this from the Loomline Trend Radar sheet → screen 06.
+- **TARGETS**: `month, brand_id, revenue_target, units_target, new_customers_target`
+  → "behind target pace" alerts.
 
 ---
 
-## Hosting on your domain
+## Weekly rhythm (≈20 min, Fridays)
 
-The dashboard is a static HTML file — no server needed:
+1. REVENUE — add this week's rows per brand × channel × category.
+2. CHANNELS — copy impressions/clicks/conversions/cost from ad managers.
+3. INVENTORY — update `quantity_on_hand` (or paste your stock export).
+4. COSTS — log anything new.
+5. Monthly: one CUSTOMERS row when the month closes.
 
-1. Host `index.html` on **Netlify** or **Cloudflare Pages** (both free, both
-   support custom domains + HTTPS; GitHub Pages needs a paid plan for
-   private repos).
-2. Point your domain (e.g. `balooo.yourdomain.com`) at it via a CNAME record.
-3. The page fetches the Apps Script `/exec` URL directly from the browser —
-   Apps Script web apps allow cross-origin GET/POST, so no proxy is needed.
+## Backend setup
 
----
+1. `backend/Code.gs` is already pointed at the spreadsheet.
+2. script.google.com → paste the file → Script Properties: `ANTHROPIC_API_KEY`
+   (optional, for Ask Balooo).
+3. Deploy → Web app → Execute as *Me*, access *Anyone* → after ANY code
+   change: Manage deployments → ✏️ → New version → Deploy.
+4. Test: `<exec-url>?mode=all` should return JSON.
+
+## Hosting
+
+`index.html` is static — host on Netlify or Cloudflare Pages (free, custom
+domains, HTTPS). The page ships with the web-app URL baked in; `?api=` can
+override it.
 
 ## Repo layout
 

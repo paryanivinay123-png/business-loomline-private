@@ -285,12 +285,52 @@ var App = {
   },
 
   ingest: function(payload){
+    // Map the live sheet structure (REVENUE/INVENTORY/ALERTS with snake_case
+    // headers) onto the dashboard's internal names. Legacy payload keys
+    // (sales/products/actions) still work as fallbacks.
+    var ALIASES = {
+      sales:    {date:'week', brand_name:'brand', geography:'geo', units_sold:'units', revenue_amount:'revenue'},
+      products: {brand_name:'brand', product_name:'product', item_name:'product', quantity_on_hand:'stock',
+                 reorder_level:'reorderlevel', unit_cost:'cost', unit_price:'price', selling_price:'price', mrp:'price'},
+      channels: {date:'week', brand_name:'brand', channel_name:'channel', clicks:'sessions', conversions:'orders',
+                 cost:'adspend', ad_spend:'adspend', new_customers:'newcustomers', returning_customers:'returningcustomers'},
+      actions:  {due_date:'due', action_required:'source'},
+      costs:    {brand_name:'brand', cost_category:'category'},
+      customers:{},
+      competitors: {price_point:'pricepoint'},
+      industry: {},
+      targets:  {brand_name:'brand', revenue_target:'revenuetarget', units_target:'unitstarget',
+                 new_customers_target:'newcustomerstarget'}
+    };
+    var take = function(keys){ for (var i=0;i<keys.length;i++){ if (payload[keys[i]] && payload[keys[i]].length) return payload[keys[i]]; } return []; };
+    var raw = {
+      sales: take(['revenue','sales']),
+      products: take(['inventory','products']),
+      channels: take(['channels']),
+      customers: take(['customers']),
+      costs: take(['costs']),
+      actions: take(['alerts','actions']),
+      competitors: take(['competitors']),
+      industry: take(['industry']),
+      targets: take(['targets']),
+      brands: take(['brands'])
+    };
     var d = {};
-    ['sales','products','channels','competitors','industry','actions','targets'].forEach(function(k){
-      d[k] = (payload[k]||[]).map(normKeys);
+    Object.keys(raw).forEach(function(k){
+      var al = ALIASES[k]||{};
+      d[k] = raw[k].map(function(row){
+        var r = normKeys(row);
+        Object.keys(al).forEach(function(from){
+          if (r[from]!=null && r[from]!=='' && (r[al[from]]==null || r[al[from]]==='')) r[al[from]] = r[from];
+        });
+        return r;
+      });
     });
+    d.products.forEach(function(r){ if (r.product==null||r.product==='') r.product = r.sku; });
     d.sales.forEach(function(r){ r._week = parseDate(r.week); });
     d.channels.forEach(function(r){ r._week = parseDate(r.week); });
+    d.costs.forEach(function(r){ r._week = parseDate(r.date); });
+    d.customers.forEach(function(r){ r._month = parseDate(r.cohort_month); });
     d.competitors.forEach(function(r){ r._date = parseDate(r.date); });
     d.industry.forEach(function(r){ r._date = parseDate(r.date); });
     this.data = d;
@@ -299,13 +339,19 @@ var App = {
     d.sales.forEach(function(r){ if (r._week) wk[r._week.getTime()] = 1; });
     this.weeks = Object.keys(wk).map(Number).sort(function(a,b){return a-b;});
 
-    // brand colors: known brands get brand colors, others from fallback list in fixed order
+    // brand colors: known brands get validated chart colors, then the BRANDS
+    // sheet's color_primary, then the fallback list in fixed order
+    var sheetCols = {};
+    d.brands.forEach(function(b){
+      if (b.brand_name && b.color_primary) sheetCols[b.brand_name] = String(b.color_primary).trim();
+    });
     var self = this, i = 0;
     this.brandCols = {};
     uniq(d.sales.concat(d.products, d.channels), 'brand').forEach(function(b){
       var meta = BRAND_META[String(b).toLowerCase()];
-      self.brandCols[b] = meta ? {col:meta.col, chart:meta.chart, wash:meta.wash, tag:meta.tag}
-        : {col:FALLBACK_BRAND_COLS[i%5], chart:FALLBACK_BRAND_COLS[i%5], wash:'#EFEDE6', tag:''};
+      if (meta) self.brandCols[b] = {col:meta.col, chart:meta.chart, wash:meta.wash, tag:meta.tag};
+      else if (sheetCols[b]) self.brandCols[b] = {col:sheetCols[b], chart:sheetCols[b], wash:'#EFEDE6', tag:''};
+      else self.brandCols[b] = {col:FALLBACK_BRAND_COLS[i%5], chart:FALLBACK_BRAND_COLS[i%5], wash:'#EFEDE6', tag:''};
       i++;
     });
 
@@ -679,7 +725,8 @@ var App = {
   // ---------------- action board ----------------
   renderBoard: function(){
     var groups = {'to do':[], 'in progress':[], 'done':[]};
-    (this.data.actions||[]).forEach(function(a){
+    (this.data.actions||[]).forEach(function(a, i){
+      a._idx = i;
       var st = String(a.status||'To do').toLowerCase();
       (groups[st] || groups['to do']).push(a);
     });
@@ -692,7 +739,7 @@ var App = {
           +(a.owner?'<span style="background:var(--paper);border-radius:999px;padding:2px 8px;font-size:10.5px;font-weight:600">'+esc(a.owner)+'</span>':'')
           +(a.due?'<span class="mono" style="font-size:10px;color:var(--mute)">'+esc(String(a.due).slice(0,10))+'</span>':'')+'</div>'
           +(a.source?'<div style="font-size:10.5px;color:var(--mute);margin-top:5px">'+esc(a.source)+'</div>':'')
-          +(next?'<div style="margin-top:8px"><button class="btn" onclick="App.moveAction(\''+esc(a.id)+'\',\''+next+'\')">→ '+next+'</button></div>':'')
+          +(next?'<div style="margin-top:8px"><button class="btn" onclick="App.moveAction('+a._idx+',\''+next+'\')">→ '+next+'</button></div>':'')
           +'</div>';
       }).join('');
       return '<div style="background:var(--cardsoft);border:1px solid var(--hairline);border-radius:10px;padding:12px;min-height:120px">'
@@ -721,10 +768,13 @@ var App = {
     this.renderAll();
     this.post({action:'addAction', card:card}).catch(function(){ /* stays local until next refresh */ });
   },
-  moveAction: function(id, status){
-    var a = (this.data.actions||[]).find(function(x){ return String(x.id)===String(id); });
-    if (a){ a.status = status; this.renderAll(); }
-    if (String(id).indexOf('tmp_')!==0) this.post({action:'updateAction', id:id, status:status}).catch(function(){});
+  moveAction: function(idx, status){
+    var a = (this.data.actions||[])[idx];
+    if (!a) return;
+    a.status = status; this.renderAll();
+    // no id column in ALERTS -> the backend matches by title instead
+    var key = (a.id && String(a.id).indexOf('tmp_')!==0) ? a.id : a.title;
+    if (key) this.post({action:'updateAction', id:key, status:status}).catch(function(){});
   },
 
   // ============================================================
@@ -748,6 +798,18 @@ var App = {
       var margin = self.marginFor(b, self.F.category==='all'?null:self.F.category);
       var d = fmtDelta(deltaPct(rev,revP));
 
+      // operating costs from the COSTS tab, same date window
+      var winFrom = W.cur.length? new Date(W.cur[0]) : null;
+      var winTo = W.cur.length? new Date(W.cur[W.cur.length-1] + 7*864e5) : null;
+      var opex = 0;
+      (self.data.costs||[]).forEach(function(c){
+        if (!c._week || !winFrom || c._week<winFrom || c._week>=winTo) return;
+        if (c.brand && c.brand!==b) return;
+        opex += num(c.amount);
+      });
+      var grossProfit = rev*margin - disc*0.5;
+      var opProfit = opex>0 ? grossProfit - opex : null;
+
       var rows = [
         ['Units', fmtNum(units), fmtDelta(deltaPct(units,unitsP))],
         ['Orders', orders?fmtNum(orders):'—', fmtDelta(deltaPct(orders,ordersP))],
@@ -755,6 +817,8 @@ var App = {
         ['Discount rate', (rev+disc)?fmtPct(disc/(rev+disc)):'—', {t:'',c:MUTE}],
         ['Return rate', units?fmtPct(rets/units):'—', {t:'',c:MUTE}],
         ['Est. gross margin', fmtPct(margin,0)+' <span style="font-size:10px;color:var(--mute)">est.</span>', {t:'',c:MUTE}],
+        ['Operating costs', opex?fmtMoney(opex):'—', {t:'',c:MUTE}],
+        ['Est. operating profit', opProfit!=null? fmtMoney(opProfit) : '—', {t:'', c: opProfit!=null ? (opProfit>=0?POS:NEG) : MUTE}],
         ['ROAS', spend?(rev/spend).toFixed(1)+'×':'—', {t:'',c:MUTE}]
       ].map(function(r){
         return '<div style="display:grid;grid-template-columns:1.2fr 1fr auto;gap:10px;padding:8px 0;border-bottom:1px solid var(--linesoft);align-items:baseline"><span style="font-size:12px;color:var(--soft)">'+r[0]+'</span><span style="font-weight:600;font-size:13.5px;font-variant-numeric:tabular-nums">'+r[1]+'</span><span class="delta" style="color:'+r[2].c+'">'+r[2].t+'</span></div>';
@@ -954,8 +1018,8 @@ var App = {
     var ch = this.channelsIn(W.cur), chP = this.channelsIn(W.prev);
     var head = '<div class="screenhead"><div class="kicker">04 · Customer &amp; channel</div><h2>Who\'s buying, where, and whether they come back</h2></div>'
       +'<p class="read">Where the money is good, not just where it\'s big.</p>';
-    if (!ch.length){
-      el.innerHTML = head + '<div class="empty">Add rows to the <span class="mono">Channels</span> tab — one per week × brand × channel with Sessions, Orders, NewCustomers, ReturningCustomers, AOV and AdSpend.</div>';
+    if (!ch.length && !(this.data.customers||[]).length && !this.salesIn(W.cur).length){
+      el.innerHTML = head + '<div class="empty">Add rows to the <span class="mono">CHANNELS</span> tab (date, channel_name, impressions, clicks, conversions, cost) and the <span class="mono">CUSTOMERS</span> tab (cohort_month, new_customers, repeat_rate, avg_ltv, acquisition_cost).</div>';
       return;
     }
     var sess = sumBy(ch,'sessions'), sessP = sumBy(chP,'sessions');
@@ -965,6 +1029,15 @@ var App = {
     var spend = sumBy(ch,'adspend');
     var conv = sess? orders/sess : 0, convP = sessP? ordersP/sessP : 0;
     var repShare = (newC+retC)? retC/(newC+retC) : 0, repShareP = (newCP+retCP)? retCP/(newCP+retCP) : 0;
+    var imp = sumBy(ch,'impressions');
+    // no new/returning split in CHANNELS -> latest cohort's repeat_rate from CUSTOMERS
+    var cohorts = (this.data.customers||[]).slice().sort(function(a,b){ return (a._month||0)-(b._month||0); });
+    var hasSplit = (newC+retC) > 0;
+    if (!hasSplit && cohorts.length){
+      var rr = num(cohorts[cohorts.length-1].repeat_rate);
+      repShare = rr>1 ? rr/100 : rr;
+      repShareP = 0;
+    }
 
     // revenue by channel from Sales for economics table
     var cur = this.salesIn(W.cur), prev = this.salesIn(W.prev);
@@ -973,10 +1046,10 @@ var App = {
 
     var kpi = function(l,v,d,s,invert){ var dd=fmtDelta(d,invert); return '<div class="kpi"><div style="display:flex;justify-content:space-between;gap:8px"><span class="l">'+l+'</span><span class="delta" style="color:'+dd.c+'">'+dd.t+'</span></div><div class="v" style="font-size:26px">'+v+'</div><div class="s">'+s+'</div></div>'; };
     var kpis = [
-      kpi('Sessions / footfall', fmtNum(sess), deltaPct(sess,sessP), 'all channels in window'),
-      kpi('Orders', fmtNum(orders), deltaPct(orders,ordersP), 'from Channels tab'),
-      kpi('Conversion', fmtPct(conv,2), deltaPct(conv,convP), 'orders ÷ sessions'),
-      kpi('Repeat share', fmtPct(repShare,0), deltaPct(repShare,repShareP), 'of identified customers'),
+      kpi('Clicks / visits', fmtNum(sess), deltaPct(sess,sessP), imp? fmtNum(imp)+' impressions' : 'all channels in window'),
+      kpi('Conversions', fmtNum(orders), deltaPct(orders,ordersP), 'from CHANNELS tab'),
+      kpi('Conversion rate', fmtPct(conv,2), deltaPct(conv,convP), 'conversions ÷ clicks'),
+      kpi('Repeat share', repShare?fmtPct(repShare,0):'—', hasSplit? deltaPct(repShare,repShareP) : null, hasSplit? 'of identified customers' : 'latest cohort, CUSTOMERS tab'),
       kpi('ROAS', spend? (totalRev/spend).toFixed(1)+'×' : '—', null, spend? fmtMoney(spend)+' ad spend':'no ad spend logged')
     ].join('');
 
@@ -987,6 +1060,10 @@ var App = {
       if (!chAgg[k]) chAgg[k] = {sess:0, orders:0, spend:0, aovW:0, aovN:0};
       chAgg[k].sess += num(r.sessions); chAgg[k].orders += num(r.orders); chAgg[k].spend += num(r.adspend);
       if (num(r.aov)>0){ chAgg[k].aovW += num(r.aov)*num(r.orders); chAgg[k].aovN += num(r.orders); }
+    });
+    // channels that earn revenue but have no CHANNELS row still belong in the table
+    Object.keys(revByCh).forEach(function(k){
+      if (k!=='—' && !chAgg[k]) chAgg[k] = {sess:0, orders:0, spend:0, aovW:0, aovN:0};
     });
     var econRows = Object.keys(chAgg).map(function(k){
       var a = chAgg[k], rev = revByCh[k]||0;
@@ -1036,15 +1113,37 @@ var App = {
       return '<div style="display:grid;grid-template-columns:140px 1fr auto auto;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--linesoft)"><span style="font-size:12px;font-weight:500">'+esc(g)+'</span><div class="bar"><div style="width:'+(geo[g]/geoMax*100).toFixed(0)+'%;background:var(--ink)"></div></div><span class="mono" style="font-size:11px;font-variant-numeric:tabular-nums">'+fmtMoney(geo[g])+'</span><span class="delta" style="color:'+d.c+';min-width:52px;text-align:right">'+d.t+'</span></div>';
     }).join('') || '<div style="font-size:12px;color:var(--mute)">Add a Geo column value in Sales rows.</div>';
 
+    // middle band: real split if CHANNELS carries it, else the CUSTOMERS cohort table
+    var midGrid;
+    if (hasSplit){
+      midGrid = '<div class="grid g2">'
+        +'<div class="card"><h3>New vs repeat</h3><div class="sub">Share of identified customers this window</div><div style="margin-top:14px;display:flex;flex-direction:column;gap:16px">'+splitHtml+'</div>'
+        +'<div style="display:flex;gap:14px;margin-top:12px"><span style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--soft)"><span style="width:8px;height:8px;border-radius:2px;background:var(--line)"></span>New</span><span style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--soft)"><span style="width:8px;height:8px;border-radius:2px;background:var(--ink)"></span>Repeat</span></div></div>'
+        +'<div class="card"><h3>Do they come back?</h3><div class="sub">Repeat share, week by week — the slope matters more than the level</div><div style="margin-top:12px">'+trendHtml+'</div></div>'
+        +'</div>';
+    } else if (cohorts.length){
+      var cohortRows = cohorts.slice(-12).reverse().map(function(c){
+        var rr = num(c.repeat_rate); rr = rr>1? rr/100 : rr;
+        var ltv = num(c.avg_ltv), cac = num(c.acquisition_cost);
+        var ratio = cac>0 ? ltv/cac : null;
+        return '<tr><td style="font-weight:600">'+esc(String(c.cohort_month).slice(0,10))+'</td>'
+          +'<td class="r">'+fmtNum(num(c.new_customers))+'</td>'
+          +'<td><div style="display:flex;align-items:center;gap:8px"><div class="bar" style="width:90px;height:6px"><div style="width:'+Math.min(100,rr*100).toFixed(0)+'%;background:'+(rr>0.3?POS:rr>0.15?AMBER:NEG)+'"></div></div><span class="mono" style="font-size:10.5px">'+fmtPct(rr,0)+'</span></div></td>'
+          +'<td class="r">'+(ltv?fmtMoney(ltv):'—')+'</td>'
+          +'<td class="r">'+(cac?fmtMoney(cac):'—')+'</td>'
+          +'<td class="r" style="color:'+(ratio==null?'var(--mute)':ratio>=3?POS:ratio>=1.5?AMBER:NEG)+';font-weight:600">'+(ratio==null?'—':ratio.toFixed(1)+'×')+'</td></tr>';
+      }).join('');
+      midGrid = '<div class="card" style="margin-top:14px"><h3>Customer cohorts</h3><div class="sub">From the CUSTOMERS tab · LTV:CAC above 3× is healthy, below 1.5× means acquisition is too expensive</div>'
+        +'<div class="tblwrap"><table class="tbl" style="min-width:700px"><thead><tr><th>Cohort</th><th style="text-align:right">New customers</th><th>Repeat rate</th><th style="text-align:right">Avg LTV</th><th style="text-align:right">CAC</th><th style="text-align:right">LTV:CAC</th></tr></thead><tbody>'+cohortRows+'</tbody></table></div></div>';
+    } else {
+      midGrid = '<div class="empty">Add cohort rows to the <span class="mono">CUSTOMERS</span> tab (cohort_month, new_customers, repeat_rate, avg_ltv, acquisition_cost) to see retention here.</div>';
+    }
+
     el.innerHTML = head
       +'<div class="grid gk" style="margin-top:0">'+kpis+'</div>'
-      +'<div class="card" style="margin-top:14px"><h3>Channel economics</h3><div class="sub">Revenue from the Sales tab · sessions, conversion and spend from the Channels tab</div>'
+      +'<div class="card" style="margin-top:14px"><h3>Channel economics</h3><div class="sub">Revenue from the REVENUE tab · clicks, conversions and spend from the CHANNELS tab</div>'
       +'<div class="tblwrap"><table class="tbl" style="min-width:860px"><thead><tr><th>Channel</th><th style="text-align:right">Revenue</th><th>Share</th><th style="text-align:right">Trend</th><th style="text-align:right">Conv</th><th style="text-align:right">AOV</th><th style="text-align:right">ROAS</th></tr></thead><tbody>'+econRows+'</tbody></table></div></div>'
-      +'<div class="grid g2">'
-      +'<div class="card"><h3>New vs repeat</h3><div class="sub">Share of identified customers this window</div><div style="margin-top:14px;display:flex;flex-direction:column;gap:16px">'+splitHtml+'</div>'
-      +'<div style="display:flex;gap:14px;margin-top:12px"><span style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--soft)"><span style="width:8px;height:8px;border-radius:2px;background:var(--line)"></span>New</span><span style="display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--soft)"><span style="width:8px;height:8px;border-radius:2px;background:var(--ink)"></span>Repeat</span></div></div>'
-      +'<div class="card"><h3>Do they come back?</h3><div class="sub">Repeat share, week by week — the slope matters more than the level</div><div style="margin-top:12px">'+trendHtml+'</div></div>'
-      +'</div>'
+      + midGrid
       +'<div class="card" style="margin-top:14px"><h3>Geography</h3><div class="sub">Revenue by geo this window · trend vs prior</div><div style="margin-top:12px">'+geoHtml+'</div></div>';
   },
 
