@@ -150,6 +150,6 @@ override it.
 
 ```
 backend/Code.gs        Apps Script API (paste into script.google.com)
-prototype/             Canva prototype (Balooo.dc.html + support.js)
+prototype/             Canva prototype (Balooo Business Math.dc.html + support.js)
 index.html             production dashboard — all six screens wired to the API
 ```
