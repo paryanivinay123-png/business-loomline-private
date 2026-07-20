@@ -335,7 +335,7 @@ var h = React.createElement;
 // --- screen groups for the two-tier navigation ---
 var GROUPS = [
   {id:'business',  t:'Business',            tabs:['math','pnl','costs','planner','yoy']},
-  {id:'product',   t:'Product & inventory', tabs:['product','inventory']},
+  {id:'product',   t:'Product & inventory', tabs:['product','inventory','materials']},
   {id:'marketing', t:'Marketing',           tabs:['sales']},
   {id:'actions',   t:'Actions',             tabs:['actions']}
 ];
@@ -421,11 +421,19 @@ function mapPayload(p){
     return {_m:parseAny(r.month), brand:String(r.brand_id||'').trim(), revTarget:num(r.revenue_target),
       unitsTarget:num(r.units_target), newCustTarget:num(r.new_customers_target)}; });
 
+  var materials = take('materials').map(function(row){ var r=normKeys(row);
+    return {material:r.material||r.material_name||'', category:String(r.category||'Other').trim(),
+      unit:r.unit||'', qty: present(r.quantity_on_hand)?num(r.quantity_on_hand):null, reorder:num(r.reorder_level),
+      status:String(r.status||'').trim(), onOrder: /^y/i.test(String(r.on_order||'')),
+      expected:r.expected_date||'', supplier:r.supplier||'', notes:r.notes||''}; })
+    .filter(function(m){ return m.material; });
+
   var brandList=[['all','Both brands']];
   Object.keys(brandsMeta).forEach(function(id){ brandList.push([id, brandsMeta[id].name]); });
 
   return {revenue:revenue, costs:costs, inventory:inventory, channels:channels,
-    customers:customers, alerts:alerts, targets:targets, brandsMeta:brandsMeta, brandList:brandList};
+    customers:customers, alerts:alerts, targets:targets, materials:materials,
+    brandsMeta:brandsMeta, brandList:brandList};
 }
 
 class Dashboard extends React.Component {
@@ -490,7 +498,7 @@ class Dashboard extends React.Component {
   TABS = [ {id:'math', t:'01 · The math'}, {id:'pnl', t:'02 · P&L'}, {id:'costs', t:'03 · Where money went'},
            {id:'product', t:'04 · What we\u2019ve made'}, {id:'sales', t:'05 · Sales & channels'},
            {id:'inventory', t:'06 · Inventory'}, {id:'yoy', t:'07 · YoY overview'}, {id:'actions', t:'08 · Actions & alerts'},
-           {id:'planner', t:'09 · Scenario planner'} ];
+           {id:'planner', t:'09 · Scenario planner'}, {id:'materials', t:'10 · Materials'} ];
 
   // ---- fabric assignment (sheet has no per-SKU fabric column; mapped from category + the fabrics you actually bought) ----
   invFabric(p){ var c=p.category, n=(p.name||'').toLowerCase();
@@ -1962,9 +1970,10 @@ class Dashboard extends React.Component {
     if(st.loading && !st.data) return page(this.notice('Loading your sheet…','Reading MASTER, BRANDS, REVENUE, COSTS, INVENTORY, CHANNELS, CUSTOMERS, ALERTS…'));
     if(st.error && !st.data) return page(this.notice('Could not load data', st.error + ' — check the Apps Script deployment (access: Anyone) and the spreadsheet ID.'));
 
-    var D=st.data||{revenue:[],costs:[],inventory:[],channels:[],customers:[],alerts:[],targets:[],brandsMeta:{},brandList:[['all','Both brands']]};
+    var D=st.data||{revenue:[],costs:[],inventory:[],channels:[],customers:[],alerts:[],targets:[],materials:[],brandsMeta:{},brandList:[['all','Both brands']]};
     this.revenue=D.revenue; this.costs=D.costs; this.inventory=D.inventory; this.channels=D.channels;
-    this.customers=D.customers; this.alerts=D.alerts; this.targets=D.targets; this.brandsMeta=D.brandsMeta; this.brandList=D.brandList;
+    this.customers=D.customers; this.alerts=D.alerts; this.targets=D.targets; this.materials=D.materials||[];
+    this.brandsMeta=D.brandsMeta; this.brandList=D.brandList;
 
     var t=this.state.tab, screen;
     if(t==='math') screen=this.renderMath();
@@ -1972,6 +1981,7 @@ class Dashboard extends React.Component {
     else if(t==='costs') screen=this.renderCosts();
     else if(t==='product') screen=this.renderProduct();
     else if(t==='inventory') screen=this.renderInventory();
+    else if(t==='materials') screen=this.renderMaterials();
     else if(t==='planner') screen=this.renderPlanner();
     else if(t==='yoy') screen=this.renderYoY();
     else if(t==='actions') screen=this.renderActions();
@@ -2153,6 +2163,12 @@ class Dashboard extends React.Component {
       detail:'e.g. '+dups[0]+' is on '+seen[dups[0]]+' rows. A SKU should be unique per piece so a sale links to the exact item — keep the family code as a prefix and add a sequence (e.g. '+dups[0]+'-01, '+dups[0]+'-02).',
       meta:'Data quality · INVENTORY'});
 
+    var matOut=(this.materials||[]).filter(function(m){ return self.statusOf(m)==='out' && !m.onOrder; });
+    if(matOut.length) out.push({sev:'amber',
+      title:matOut.length+' material'+(matOut.length>1?'s are':' is')+' out of stock',
+      detail:'e.g. '+matOut[0].material+' — out and not on order. Reorder before it blocks making.',
+      meta:'Materials'});
+
     // --- business signals ---
     if(s.pieces) out.push({sev:'neg', title:s.pieces+' finished pieces unsold',
       detail:self.money(s.stock)+' of stock tied up — turning it to cash is the whole game right now.', meta:'Inventory'});
@@ -2162,6 +2178,81 @@ class Dashboard extends React.Component {
       detail:self.money(dept['Marketing'])+' on shoots, site & ads vs '+self.money(s.earned)+' of sales to show for it so far.', meta:'Costs'});
 
     return out;
+  }
+
+
+  // ---- Materials · raw-material stock at a glance ----
+  statusOf(m){ var s=(m.status||'').toLowerCase();
+    if(/out/.test(s)) return 'out';
+    if(/low/.test(s)) return 'low';
+    if(/in|stock|good/.test(s)) return 'in';
+    if(m.qty!=null && m.reorder>0){ if(m.qty<=0) return 'out'; if(m.qty<=m.reorder) return 'low'; return 'in'; }
+    if(m.qty!=null) return m.qty<=0?'out':'in';
+    return 'in'; }
+
+  renderMaterials(){ const C=this.C, h=React.createElement, self=this;
+    var mats=this.materials||[];
+    var STC={in:C.pos, low:C.amber, out:C.neg}, STL={in:'In stock', low:'Running low', out:'Out of stock'};
+    var pill=function(s){ return h('span',{style:{fontFamily:C.mono,fontSize:'9.5px',fontWeight:700,letterSpacing:'0.04em',textTransform:'uppercase',
+      color:STC[s], background:STC[s]+'1A', borderRadius:'999px', padding:'3px 9px', whiteSpace:'nowrap'}}, STL[s]); };
+    var qtyLabel=function(m){ return (m.qty!=null? (Math.round(m.qty*100)/100)+(m.unit?(' '+m.unit):'') : '—'); };
+
+    var head=h('div',{style:{marginTop:'2px'}},
+      self.kicker('Materials · raw stock'),
+      h('h2',{style:{fontFamily:C.serif,fontSize:'25px',margin:'6px 0 0',fontWeight:400}}, 'What you have to make with'),
+      h('p',{style:{fontFamily:C.serif,fontStyle:'italic',fontSize:'16px',color:C.soft,margin:'8px 0 16px',maxWidth:'820px',lineHeight:1.5}},
+        'A quick read on threads, paints, buttons, fabric and packaging — what’s in stock, what’s running low, and what’s already on order. No need for exact counts; the status is enough.'));
+
+    if(!mats.length){
+      return h('div',null, head,
+        h('div',{style:{border:'1px dashed '+C.line,borderRadius:'10px',background:'#FBFAF7',padding:'18px',fontSize:'13px',color:C.soft,marginTop:'6px'}},
+          'Add rows to the ', h('span',{style:{fontFamily:C.mono}},'MATERIALS'), ' tab (material, category, status, on_order) and this fills in — a simple stock board for your raw materials.'));
+    }
+
+    var cnt={in:0,low:0,out:0,order:0};
+    mats.forEach(function(m){ cnt[self.statusOf(m)]++; if(m.onOrder) cnt.order++; });
+
+    var kpis=h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:'12px'}},
+      self.stat('Materials', String(mats.length), 'tracked', C.ink),
+      self.stat('In stock', String(cnt.in), 'good to go', C.pos),
+      self.stat('Running low', String(cnt.low), 'plan a restock', cnt.low?C.amber:C.pos),
+      self.stat('Out of stock', String(cnt.out), cnt.out?'may block making':'none', cnt.out?C.neg:C.pos),
+      self.stat('On order', String(cnt.order), 'pending delivery', self.DCOL[2]));
+
+    // buy-next: low or out and not already on order
+    var buy=mats.filter(function(m){ var s=self.statusOf(m); return (s==='low'||s==='out') && !m.onOrder; })
+      .sort(function(a,b){ return (self.statusOf(a)==='out'?0:1) - (self.statusOf(b)==='out'?0:1); });
+    var buyCard = buy.length ? self.card([
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px'}},
+        h('div',null, self.h3('Buy next'), self.sub('Running low or out — and not yet on order')),
+        h('span',{style:{fontFamily:C.mono,fontSize:'10px',color:C.neg,fontWeight:600}}, buy.length+' to reorder')),
+      h('div',{style:{marginTop:'10px'}}, buy.map(function(m,i){ var s=self.statusOf(m);
+        return h('div',{key:i,style:{display:'grid',gridTemplateColumns:'1fr 120px 120px',gap:'10px',alignItems:'center',padding:'9px 0',borderBottom:'1px solid '+C.linesoft}},
+          h('div',{style:{minWidth:0}}, h('div',{style:{fontSize:'13px',fontWeight:600}}, m.material),
+            h('div',{style:{fontSize:'10.5px',color:C.mute}}, m.category + (m.supplier?(' · '+m.supplier):''))),
+          h('span',{style:{fontFamily:C.mono,fontSize:'11.5px',color:C.soft,textAlign:'right'}}, qtyLabel(m)),
+          h('span',{style:{textAlign:'right'}}, pill(s))); }))
+    ], {marginTop:'14px'}) : self.card([ self.h3('Buy next'),
+      h('div',{style:{fontSize:'12.5px',color:C.soft,marginTop:'8px'}}, 'Nothing urgent — everything low or out is already on order.') ], {marginTop:'14px'});
+
+    // by category
+    var cats={}; mats.forEach(function(m){ (cats[m.category]=cats[m.category]||[]).push(m); });
+    var catKeys=Object.keys(cats).sort(function(a,b){ return cats[b].length-cats[a].length; });
+    var catCards=catKeys.map(function(k){ var list=cats[k].slice().sort(function(a,b){
+        var o={out:0,low:1,in:2}; return o[self.statusOf(a)]-o[self.statusOf(b)]; });
+      return self.card([
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline'}},
+          self.h3(k), h('span',{style:{fontFamily:C.mono,fontSize:'10px',color:C.mute}}, list.length+' item'+(list.length>1?'s':''))),
+        h('div',{style:{marginTop:'10px'}}, list.map(function(m,i){ var s=self.statusOf(m);
+          return h('div',{key:i,style:{display:'grid',gridTemplateColumns:'1fr auto auto',gap:'10px',alignItems:'center',padding:'8px 0',borderBottom:'1px solid '+C.linesoft}},
+            h('div',{style:{minWidth:0}}, h('div',{style:{fontSize:'12.5px',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}, m.material),
+              h('div',{style:{fontSize:'10px',color:C.mute}}, qtyLabel(m) + (m.onOrder?' · on order'+(m.expected?(' · '+m.expected):''):''))),
+            m.onOrder? h('span',{style:{fontFamily:C.mono,fontSize:'8.5px',fontWeight:700,letterSpacing:'0.05em',textTransform:'uppercase',color:self.DCOL[2],background:self.DCOL[2]+'1A',borderRadius:'999px',padding:'3px 8px'}},'On order') : h('span',null,''),
+            pill(s)); }))
+      ]); });
+
+    return h('div',null, head, kpis, buyCard,
+      h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))',gap:'14px',marginTop:'14px'}}, catCards));
   }
 
 }

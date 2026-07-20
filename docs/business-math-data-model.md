@@ -207,6 +207,36 @@ customers`; `new_customers[m] = count(first_order_date in month m)`.
 | units_target | O | 25 |
 | new_customers_target | O | 20 |
 
+### MATERIALS — raw-material stock (new) → powers the Materials screen
+
+One row per raw material (thread, paint, button, fabric, packaging…). Estimate-friendly:
+`status` alone is enough; quantities are optional.
+
+| column | R/O | example | powers |
+|---|---|---|---|
+| material | R | White thread | label |
+| category | R | Thread | grouping — Fabric/Thread/Paint/Dye/Button/Trim/Packaging/Article/Other |
+| unit | O | spool | metre/spool/jar/piece/packet/kg/set |
+| quantity_on_hand | O | 2 | optional estimate |
+| reorder_level | O | 5 | derives low-stock when status is blank |
+| status | R | Running low | the at-a-glance — In stock / Running low / Out of stock |
+| on_order | O | Yes | "what's pending" — excludes it from the Buy-next list |
+| expected_date | O | 01/08/2026 | when the reorder lands |
+| supplier | O | Local | where to reorder |
+| notes | O | | anything |
+
+### SKU_MATERIALS — bill of materials (optional) → link materials to pieces
+
+Only if you want to know which pieces use a material. One row per `sku × material`.
+
+| column | R/O | example |
+|---|---|---|
+| sku | R | HB1HE-01 |
+| material | R | Bamboo fabric |
+| qty_used | O | 1.5 |
+| unit | O | metre |
+| notes | O | shirt body |
+
 ---
 
 ## 3. Deriving `unit_cost` when you don't track it per piece

@@ -36,6 +36,8 @@ const CONFIG = {
     channels: 'CHANNELS',
     customers: 'CUSTOMERS',
     alerts: 'ALERTS',
+    materials: 'MATERIALS',
+    sku_materials: 'SKU_MATERIALS',
     competitors: 'COMPETITORS',
     industry: 'INDUSTRY',
     targets: 'TARGETS'
