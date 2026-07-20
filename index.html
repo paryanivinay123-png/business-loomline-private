@@ -388,11 +388,12 @@ function mapPayload(p){
     return {_d:parseAny(r.date), brand:String(r.brand_id||'').trim(), func:String(r.cost_function||'').trim(),
       stage:String(r.cost_stage||'').trim(), dept:String(r.department||'').trim(),
       item:r.line_item||r.cost_category||'', amt:num(r.amount),
-      gstAmt: present(r.gst_amount)?num(r.gst_amount):null, sku:r.sku||'', vendor:r.vendor||''}; })
+      gstAmt: present(r.gst_amount)?num(r.gst_amount):null,
+      family:String(r.style_family||r.sku||'').trim(), sku:r.sku||'', vendor:r.vendor||''}; })
     .filter(function(c){ return c.amt>0 || c.item; });
 
   var inventory = take('inventory','products').map(function(row){ var r=normKeys(row);
-    return {sku:r.sku||'', brand:String(r.brand_id||'').trim(), name:r.product_name||r.sku||'',
+    return {sku:r.sku||'', family:String(r.style_family||'').trim(), brand:String(r.brand_id||'').trim(), name:r.product_name||r.sku||'',
       category:r.category||'', collection:r.collection||'', fabric:String(r.fabric||'').trim(),
       cost: present(r.unit_cost)?num(r.unit_cost):null, price:num(r.unit_price||r.price),
       qty: present(r.quantity_on_hand)?num(r.quantity_on_hand):1, reorder:num(r.reorder_level),
@@ -2253,6 +2254,111 @@ class Dashboard extends React.Component {
 
     return h('div',null, head, kpis, buyCard,
       h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))',gap:'14px',marginTop:'14px'}}, catCards));
+  }
+
+
+  // ---- 03 · Where money went + Product cost attributed by style family ----
+  renderCosts(){ const C=this.C, h=React.createElement, self=this;
+    var total=this.costs.reduce(function(s,c){return s+c.amt;},0);
+    var tree=this.costTree();
+    var L1COL={'Product':C.ps,'Marketing & brand':self.DCOL[0],'Overheads':self.DCOL[7]};
+    var product=tree.filter(function(g){return g.key==='Product';})[0];
+    var exp=0, fin=0;
+    if(product){ product.subList.forEach(function(sb){ if(/experiment/i.test(sb.key)) exp+=sb.amount; else fin+=sb.amount; }); }
+    var marketing=(tree.filter(function(g){return g.key==='Marketing & brand';})[0]||{amount:0}).amount;
+
+    var head=h('div',{style:{marginTop:'2px'}},
+      self.kicker('03 · Where the money went'),
+      h('h2',{style:{fontFamily:C.serif,fontSize:'25px',margin:'6px 0 0',fontWeight:400}}, 'Every rupee, properly organised'),
+      h('p',{style:{fontFamily:C.serif,fontStyle:'italic',fontSize:'16px',color:C.soft,margin:'8px 0 16px',maxWidth:'840px',lineHeight:1.5}},
+        self.money(total)+' rolled up into three functions — Product, Marketing & brand, Overheads — with Product split into R&D experiments vs final production. Click any group to open its line items.'));
+
+    var kpis=h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(185px,1fr))',gap:'12px'}},
+      self.stat('Total invested', self.money(total), this.costs.length+' entries', C.ink),
+      self.stat('Product', self.money(exp+fin), total?self.pct((exp+fin)/total)+' of spend':'', C.ps),
+      self.stat('— R&D / experiments', self.money(exp), 'samples, silhouette trials', self.DCOL[3]),
+      self.stat('— Final production', self.money(fin), 'goods for sale', self.DCOL[5]),
+      self.stat('Marketing & brand', self.money(marketing), total?self.pct(marketing/total)+' of spend':'', self.DCOL[0]));
+
+    var prodTot=exp+fin||1;
+    var splitBar=self.card([
+      self.h3('Experiment vs final production'),
+      self.sub('Of the '+self.money(exp+fin)+' spent on product, how much was learning vs sellable goods'),
+      h('div',{style:{display:'flex',height:'34px',borderRadius:'8px',overflow:'hidden',marginTop:'16px'}},
+        h('div',{style:{width:(exp/prodTot*100).toFixed(1)+'%',background:self.DCOL[3],display:'flex',alignItems:'center',paddingLeft:'12px',color:'#fff',fontSize:'12px',fontWeight:600,minWidth:0}}, 'R&D '+self.pct(exp/prodTot)),
+        h('div',{style:{width:(fin/prodTot*100).toFixed(1)+'%',background:self.DCOL[5],display:'flex',alignItems:'center',paddingLeft:'12px',color:'#fff',fontSize:'12px',fontWeight:600,minWidth:0}}, 'Final '+self.pct(fin/prodTot))),
+      h('div',{style:{fontSize:'12px',color:C.soft,marginTop:'12px',lineHeight:1.55}},
+        self.pct(exp/prodTot)+' of product spend went into experiments and samples — expected while you’re finding silhouettes. Watch this ratio fall as the line matures.')
+    ], {marginTop:'14px'});
+
+    function itemRow(it){ return h('div',{key:it.label,style:{display:'grid',gridTemplateColumns:'1fr 110px',gap:'8px',padding:'4px 0 4px 60px',borderTop:'1px dashed '+C.linesoft}},
+      h('span',{style:{fontSize:'11.5px',color:C.mute,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}, it.label+'  ·  '+it.dept),
+      h('span',{style:{fontFamily:C.mono,fontSize:'11.5px',color:C.soft,textAlign:'right'}}, self.inr(it.amt))); }
+    function subRow(sb,l1key,col){ var key='c2::'+l1key+'::'+sb.key, open=!!self.state.costOpen[key];
+      var header=h('div',{onClick:function(){self.toggleCost(key);},style:{display:'grid',gridTemplateColumns:'14px 1fr 110px',gap:'8px',alignItems:'center',cursor:'pointer',padding:'7px 0 7px 26px',borderTop:'1px solid '+C.linesoft}},
+        h('span',{style:{fontFamily:C.mono,fontSize:'10px',color:C.mute,transform:open?'rotate(90deg)':'none'}}, '▸'),
+        h('span',{style:{fontSize:'12.5px',fontWeight:600,color:C.soft}}, sb.key+'  ·  '+sb.items.length),
+        h('span',{style:{fontFamily:C.mono,fontSize:'12px',fontWeight:600,textAlign:'right'}}, self.inr(sb.amount)));
+      return open? h('div',{key:key}, header, sb.items.map(itemRow)) : h('div',{key:key}, header); }
+    var maxL1=Math.max.apply(null,tree.map(function(g){return g.amount;}))||1;
+    function l1Row(g){ var key='c1::'+g.key, open=self.state.costOpen[key]!==false; var col=L1COL[g.key]||C.mute;
+      var header=h('div',{onClick:function(){self.toggleCost(key);},style:{display:'grid',gridTemplateColumns:'16px 1fr 90px 120px',gap:'8px',alignItems:'center',cursor:'pointer',padding:'11px 0',borderTop:'1.5px solid '+C.ink}},
+        h('span',{style:{fontFamily:C.mono,fontSize:'12px',color:C.soft,transform:open?'rotate(90deg)':'none'}}, '▸'),
+        h('span',{style:{fontSize:'14px',fontWeight:700,display:'flex',alignItems:'center',gap:'8px'}}, h('span',{style:{width:'11px',height:'11px',borderRadius:'3px',background:col,flex:'none'}}), g.key),
+        h('div',{style:{height:'8px',background:C.linesoft,borderRadius:'4px',overflow:'hidden'}}, h('div',{style:{height:'100%',width:(g.amount/maxL1*100)+'%',background:col,borderRadius:'4px'}})),
+        h('span',{style:{fontFamily:C.mono,fontSize:'13.5px',fontWeight:700,textAlign:'right'}}, self.inr(g.amount)+'  '));
+      return open? h('div',{key:key}, header, g.subList.map(function(sb){return subRow(sb,g.key,col);})) : h('div',{key:key}, header); }
+    var treeCard=self.card([
+      h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px',borderBottom:'1px solid '+C.line,paddingBottom:'10px'}},
+        h('div',null, self.h3('Cost breakdown structure'), self.sub('Function → sub-group → line item · click to expand or collapse')),
+        h('div',{style:{fontFamily:C.mono,fontSize:'10px',color:C.mute}}, tree.length+' functions · '+self.money(total))),
+      h('div',{style:{marginTop:'2px'}}, tree.map(l1Row))
+    ], {marginTop:'14px'});
+
+    // ---- Product cost attributed by style family ----
+    var prodCosts=this.costs.filter(function(c){ return self.costClass(c).bucket==='cogs'; });
+    var famAmt={}, tagged=0;
+    prodCosts.forEach(function(c){ var k=c.family||'(untagged)'; if(c.family) tagged+=c.amt; famAmt[k]=(famAmt[k]||0)+c.amt; });
+    var famPieces={}; this.inventory.forEach(function(p){ if(p.family) famPieces[p.family]=(famPieces[p.family]||0)+(p.qty||1); });
+    var famKeys=Object.keys(famAmt).sort(function(a,b){return famAmt[b]-famAmt[a];});
+    var famMax=famKeys.length?famAmt[famKeys[0]]:1;
+    var famCard;
+    if(tagged>0){
+      famCard=self.card([
+        h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px'}},
+          h('div',null, self.h3('Product cost by style family'),
+            self.sub('Materials & making attributed to each family (COSTS.style_family) — with a rough make-cost per piece')),
+          h('span',{style:{fontFamily:C.mono,fontSize:'10px',color:C.mute}}, famKeys.length+' families')),
+        h('div',{style:{marginTop:'14px'}}, famKeys.map(function(k,i){ var amt=famAmt[k], pcs=famPieces[k]||0, per=pcs?amt/pcs:null;
+          var col=k==='(untagged)'?C.mute:self.DCOL[i%self.DCOL.length];
+          return h('div',{key:k,style:{padding:'9px 0',borderBottom:'1px solid '+C.linesoft}},
+            h('div',{style:{display:'grid',gridTemplateColumns:'150px 1fr 96px',gap:'10px',alignItems:'center'}},
+              h('span',{style:{fontSize:'12.5px',fontWeight:600,display:'flex',alignItems:'center',gap:'7px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},
+                h('span',{style:{width:'9px',height:'9px',borderRadius:'2px',background:col,flex:'none'}}), k),
+              h('div',{style:{height:'9px',background:C.linesoft,borderRadius:'5px',overflow:'hidden'}},
+                h('div',{style:{height:'100%',width:(amt/famMax*100)+'%',background:col,borderRadius:'5px'}})),
+              h('span',{style:{fontFamily:C.mono,fontSize:'12px',fontWeight:600,textAlign:'right'}}, self.money(amt))),
+            h('div',{style:{display:'flex',gap:'12px',marginTop:'4px',marginLeft:'16px',fontFamily:C.mono,fontSize:'10px',color:C.mute}},
+              h('span',null, tagged?self.pct(amt/(exp+fin||1),0)+' of product spend':''),
+              per!=null? h('span',null, '≈ '+self.money(per)+'/piece across '+pcs+' pc') : h('span',null, k==='(untagged)'?'add style_family to attribute these':'no pieces in INVENTORY yet'))); }))
+      ], {marginTop:'14px'});
+    } else {
+      famCard=self.card([
+        self.h3('Product cost by style family'),
+        h('div',{style:{fontSize:'12.5px',color:C.soft,marginTop:'8px',lineHeight:1.65}},
+          'Tag each Product cost row with a ', h('b',null,'style_family'), ' (e.g. HB1HE) in the COSTS tab and this shows how much you’ve spent making each family — plus a rough make-cost per piece (family spend ÷ pieces in INVENTORY). It’s the small-team way to attribute cost without tracking every SKU.')
+      ], {marginTop:'14px'});
+    }
+
+    var sheetTip=self.card([
+      self.h3('How to keep this clean in the sheet'),
+      h('div',{style:{fontSize:'12.5px',color:C.soft,marginTop:'8px',lineHeight:1.65}},
+        'Each COSTS row needs ', h('b',null,'cost_function'), ' (Product / Marketing & brand / Overheads) and ',
+        h('b',null,'cost_stage'), ' (Experiment / Final production / —). For production spend, add the ',
+        h('b',null,'style_family'), ' so it rolls up per family above — much lighter than tagging every SKU while you’re small.')
+    ], {marginTop:'14px'});
+
+    return h('div',null, head, kpis, splitBar, treeCard, famCard, sheetTip);
   }
 
 }

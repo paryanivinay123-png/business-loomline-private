@@ -105,7 +105,7 @@ One row per expense/invoice line. This is the tab that most needs structure.
 | line_item | R | Bamboo fabric 15m | the human description (was `cost_category`) |
 | amount | R | 8100 | gross cash paid (GST-inclusive) |
 | gst_amount | **Rec** | 386 | exact recoverable ITC from the invoice; `base = amount − gst_amount`. Blank → estimated by `department` rate |
-| sku | O | HB-SHIRT-0004 | ties production cost to a specific piece → **true per-SKU `unit_cost`** (see §3) |
+| style_family | Rec | HB1HE | attributes production spend to a **style family** (lighter than per-SKU while small) → "Product cost by style family" + a rough make-cost per piece. Links to `INVENTORY.style_family`. A specific `sku` also works if you'd rather go per-piece. |
 | vendor | O | Fabriclore | spend-by-vendor (future) |
 | paid | O | Yes | cashflow view (future) |
 
