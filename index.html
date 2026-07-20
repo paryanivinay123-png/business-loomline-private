@@ -378,10 +378,11 @@ function mapPayload(p){
 
   var revenue = take('revenue','sales').map(function(row){ var r=normKeys(row); var d=parseAny(r.date);
     var gross=num(r.revenue), retV=num(r.returns_value);
+    var sku=r.sku||''; var fam=String(r.style_family||'').trim() || (sku? sku.replace(/-\d+$/,'') : '');
     return {_d:d, date:d?fmtDate(d):(r.date||''), brand:String(r.brand_id||'').trim(),
       channel:r.channel||'Retail', category:r.category||'', collection:r.collection||'—',
       geo:r.geography||r.geo||'', revenue:gross-retV, gross:gross, units:num(r.units_sold||r.units),
-      returnsUnits:num(r.returns_units), sku:r.sku||'', customerId:r.customer_id||'', discount:num(r.discount_amount)}; });
+      returnsUnits:num(r.returns_units), sku:sku, family:fam, customerId:r.customer_id||'', discount:num(r.discount_amount)}; });
   revenue.forEach(function(r){ ensureBrand(r.brand); });
 
   var costs = take('costs').map(function(row){ var r=normKeys(row);
@@ -2125,10 +2126,20 @@ class Dashboard extends React.Component {
         h('span',{style:{fontFamily:C.serif,fontSize:'20px',whiteSpace:'nowrap'}}, self.inr(r.revenue))); });
     var log=self.card([ self.h3('Every sale, logged'), self.sub('Straight from the REVENUE tab'), h('div',{style:{marginTop:'8px'}}, rows) ], {marginTop:'14px'});
 
+    // revenue by style family (mirrors cost-by-family on Where money went)
+    var byFam={}; s.rev.forEach(function(r){ if(r.family) byFam[r.family]=(byFam[r.family]||0)+r.revenue; });
+    var famK=Object.keys(byFam).sort(function(a,b){return byFam[b]-byFam[a];});
+    var famMax=famK.length?byFam[famK[0]]:1;
+    var famRevCard = famK.length ? self.card([
+      self.h3('Revenue by style family'),
+      self.sub('Which families are actually selling — pair with cost-by-family on Where money went'),
+      h('div',{style:{marginTop:'12px'}}, famK.map(function(k){ return self.hbar(k, byFam[k], famMax, C.ps, self.pct(byFam[k]/(s.earned||1))); }))
+    ], {marginTop:'14px'}) : null;
+
     return h('div',null, head, kpis, channelCard,
       h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))',gap:'14px',marginTop:'14px'}}, cityCard, audienceCard),
       h('div',{style:{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(340px,1fr))',gap:'14px',marginTop:'14px'}}, stCard, priceCard),
-      log);
+      famRevCard, log);
   }
 
 
@@ -2315,22 +2326,26 @@ class Dashboard extends React.Component {
       h('div',{style:{marginTop:'2px'}}, tree.map(l1Row))
     ], {marginTop:'14px'});
 
-    // ---- Product cost attributed by style family ----
+    // ---- Style family economics: cost + revenue + category mix ----
     var prodCosts=this.costs.filter(function(c){ return self.costClass(c).bucket==='cogs'; });
     var famAmt={}, tagged=0;
     prodCosts.forEach(function(c){ var k=c.family||'(untagged)'; if(c.family) tagged+=c.amt; famAmt[k]=(famAmt[k]||0)+c.amt; });
-    var famPieces={}; this.inventory.forEach(function(p){ if(p.family) famPieces[p.family]=(famPieces[p.family]||0)+(p.qty||1); });
+    var famPieces={}, famCats={};
+    this.inventory.forEach(function(p){ if(!p.family) return; famPieces[p.family]=(famPieces[p.family]||0)+(p.qty||1);
+      if(!famCats[p.family]) famCats[p.family]={}; var cc=p.category||'—'; famCats[p.family][cc]=(famCats[p.family][cc]||0)+(p.qty||1); });
+    var famRev={}; this.revenue.forEach(function(r){ if(r.family) famRev[r.family]=(famRev[r.family]||0)+r.revenue; });
     var famKeys=Object.keys(famAmt).sort(function(a,b){return famAmt[b]-famAmt[a];});
     var famMax=famKeys.length?famAmt[famKeys[0]]:1;
     var famCard;
     if(tagged>0){
       famCard=self.card([
         h('div',{style:{display:'flex',justifyContent:'space-between',alignItems:'baseline',flexWrap:'wrap',gap:'8px'}},
-          h('div',null, self.h3('Product cost by style family'),
-            self.sub('Materials & making attributed to each family (COSTS.style_family) — with a rough make-cost per piece')),
+          h('div',null, self.h3('Style family economics'),
+            self.sub('Make-cost, revenue and category mix per family — jacket & accessory stay separate')),
           h('span',{style:{fontFamily:C.mono,fontSize:'10px',color:C.mute}}, famKeys.length+' families')),
-        h('div',{style:{marginTop:'14px'}}, famKeys.map(function(k,i){ var amt=famAmt[k], pcs=famPieces[k]||0, per=pcs?amt/pcs:null;
+        h('div',{style:{marginTop:'14px'}}, famKeys.map(function(k,i){ var amt=famAmt[k], pcs=famPieces[k]||0, per=pcs?amt/pcs:null, rev=famRev[k]||0, net=rev-amt;
           var col=k==='(untagged)'?C.mute:self.DCOL[i%self.DCOL.length];
+          var catStr=Object.keys(famCats[k]||{}).map(function(c){return famCats[k][c]+' '+c;}).join(' · ') || (k==='(untagged)'?'add style_family to attribute':'no pieces yet');
           return h('div',{key:k,style:{padding:'9px 0',borderBottom:'1px solid '+C.linesoft}},
             h('div',{style:{display:'grid',gridTemplateColumns:'150px 1fr 96px',gap:'10px',alignItems:'center'}},
               h('span',{style:{fontSize:'12.5px',fontWeight:600,display:'flex',alignItems:'center',gap:'7px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}},
@@ -2338,15 +2353,17 @@ class Dashboard extends React.Component {
               h('div',{style:{height:'9px',background:C.linesoft,borderRadius:'5px',overflow:'hidden'}},
                 h('div',{style:{height:'100%',width:(amt/famMax*100)+'%',background:col,borderRadius:'5px'}})),
               h('span',{style:{fontFamily:C.mono,fontSize:'12px',fontWeight:600,textAlign:'right'}}, self.money(amt))),
-            h('div',{style:{display:'flex',gap:'12px',marginTop:'4px',marginLeft:'16px',fontFamily:C.mono,fontSize:'10px',color:C.mute}},
-              h('span',null, tagged?self.pct(amt/(exp+fin||1),0)+' of product spend':''),
-              per!=null? h('span',null, '≈ '+self.money(per)+'/piece across '+pcs+' pc') : h('span',null, k==='(untagged)'?'add style_family to attribute these':'no pieces in INVENTORY yet'))); }))
+            h('div',{style:{display:'flex',gap:'12px',marginTop:'4px',marginLeft:'16px',flexWrap:'wrap',fontFamily:C.mono,fontSize:'10px',color:C.mute}},
+              h('span',{style:{color:C.soft}}, catStr),
+              per!=null? h('span',null, '≈ '+self.money(per)+'/pc') : null,
+              rev? h('span',null, 'rev '+self.money(rev)) : null,
+              rev? h('span',{style:{color: net>=0?C.pos:C.neg,fontWeight:600}}, (net>=0?'+':'−')+self.money(Math.abs(net))+' net') : null)); }))
       ], {marginTop:'14px'});
     } else {
       famCard=self.card([
-        self.h3('Product cost by style family'),
+        self.h3('Style family economics'),
         h('div',{style:{fontSize:'12.5px',color:C.soft,marginTop:'8px',lineHeight:1.65}},
-          'Tag each Product cost row with a ', h('b',null,'style_family'), ' (e.g. HB1HE) in the COSTS tab and this shows how much you’ve spent making each family — plus a rough make-cost per piece (family spend ÷ pieces in INVENTORY). It’s the small-team way to attribute cost without tracking every SKU.')
+          'Tag each Product cost row with a ', h('b',null,'style_family'), ' (e.g. HB1HE) in COSTS, and put the same family on REVENUE rows. This then shows make-cost, revenue and net per family — plus the category mix, so jacket and accessory stay visible even inside one family.')
       ], {marginTop:'14px'});
     }
 

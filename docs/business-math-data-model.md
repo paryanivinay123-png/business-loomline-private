@@ -76,7 +76,8 @@ One row per sale. For single-piece SKUs this is literally one row per garment so
 |---|---|---|---|
 | date | R | 17/07/2026 | time-series, cohorts (Monday-of-week is fine for weekly aggregates) |
 | brand_id | R | HB | brand filter, per-brand P&L |
-| sku | **Rec** | HB-SHIRT-0004 | **links the sale to INVENTORY → realised margin = revenue − unit_cost, exact sell-through, decrements stock** |
+| sku | **Rec** | HB1HE-01 | **links the sale to the exact piece in INVENTORY → realised margin, exact sell-through, decrements stock** |
+| style_family | **Rec** | HB1HE | rolls the sale up to its family → "Revenue by style family" (Sales) pairs with cost-by-family (Where money went). Derived from `sku` if left blank. |
 | channel | R | Retail | channel matrix; must match `CHANNELS.channel_name` |
 | category | R | Shirt | sell-through by category |
 | collection | R | Launch · Harm the Harmonium | "where revenue comes from" (screen 08) |
