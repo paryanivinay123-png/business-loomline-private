@@ -376,9 +376,16 @@ function mapPayload(p){
   function ensureBrand(id){ if(id && id!=='Shared' && !brandsMeta[id])
     brandsMeta[id] = {name:id, col:FALL[Object.keys(brandsMeta).length%5], tag:''}; }
 
+  // sku -> style_family lookup from INVENTORY (robust when SKUs end in letters, e.g. HB1HE-HH)
+  function normSku(s){ return String(s||'').replace(/\s+/g,'').trim(); }
+  var invFamBySku = {};
+  take('inventory','products').forEach(function(row){ var r=normKeys(row); var s=normSku(r.sku);
+    if(s) invFamBySku[s] = String(r.style_family||'').trim() || s.replace(/-\d+$/,''); });
+
   var revenue = take('revenue','sales').map(function(row){ var r=normKeys(row); var d=parseAny(r.date);
     var gross=num(r.revenue), retV=num(r.returns_value);
-    var sku=r.sku||''; var fam=String(r.style_family||'').trim() || (sku? sku.replace(/-\d+$/,'') : '');
+    var sku=String(r.sku||'').trim();
+    var fam=String(r.style_family||'').trim() || invFamBySku[normSku(sku)] || (sku? sku.replace(/-\d+$/,'') : '');
     return {_d:d, date:d?fmtDate(d):(r.date||''), brand:String(r.brand_id||'').trim(),
       channel:r.channel||'Retail', category:r.category||'', collection:r.collection||'—',
       geo:r.geography||r.geo||'', revenue:gross-retV, gross:gross, units:num(r.units_sold||r.units),
@@ -394,7 +401,7 @@ function mapPayload(p){
     .filter(function(c){ return c.amt>0 || c.item; });
 
   var inventory = take('inventory','products').map(function(row){ var r=normKeys(row);
-    return {sku:r.sku||'', family:String(r.style_family||'').trim(), brand:String(r.brand_id||'').trim(), name:r.product_name||r.sku||'',
+    return {sku:String(r.sku||'').trim(), family:String(r.style_family||'').trim(), brand:String(r.brand_id||'').trim(), name:r.product_name||r.sku||'',
       category:r.category||'', collection:r.collection||'', fabric:String(r.fabric||'').trim(), size:String(r.size||'').trim(),
       cost: present(r.unit_cost)?num(r.unit_cost):null, price:num(r.unit_price||r.price),
       qty: present(r.quantity_on_hand)?num(r.quantity_on_hand):1, reorder:num(r.reorder_level),
