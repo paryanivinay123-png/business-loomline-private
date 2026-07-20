@@ -78,6 +78,7 @@ One row per sale. For single-piece SKUs this is literally one row per garment so
 | brand_id | R | HB | brand filter, per-brand P&L |
 | sku | **Rec** | HB1HE-01 | **links the sale to the exact piece in INVENTORY → realised margin, exact sell-through, decrements stock** |
 | style_family | **Rec** | HB1HE | rolls the sale up to its family → "Revenue by style family" (Sales) pairs with cost-by-family (Where money went). Derived from `sku` if left blank. |
+| size | O | M | which size sold (redundant if `sku` is a specific size-piece, but handy for size-level sales detail) |
 | channel | R | Retail | channel matrix; must match `CHANNELS.channel_name` |
 | category | R | Shirt | sell-through by category |
 | collection | R | Launch · Harm the Harmonium | "where revenue comes from" (screen 08) |
@@ -132,6 +133,7 @@ One row per SKU. Fix the current duplicate-SKU problem: each SKU must be **uniqu
 | category | R | Shirt | assortment, sell-through — dropdown |
 | collection | Rec | Launch · Harm the Harmonium | ties stock to a drop |
 | fabric | **R** | Bamboo | Inventory-by-fabric (today inferred) — dropdown |
+| size | **Rec** | M | size is a piece-level variant — each size is its own row with its own `unit_cost`, so a larger size costing more is captured. Powers "Units by size". Dropdown: XS/S/M/L/XL/XXL/Free Size/Custom |
 | unit_cost | **R** | 3200 | **make-cost/piece → margin, COGS, closing stock at cost, planner variable cost** |
 | unit_price | R | 10100 | list/retail price → stock value, price architecture |
 | quantity_on_hand | **R** | 1 | real stock (today ignored) |
