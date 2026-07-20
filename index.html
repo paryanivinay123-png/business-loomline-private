@@ -2120,6 +2120,50 @@ class Dashboard extends React.Component {
       log);
   }
 
+
+  // ---- 08 · data-quality guards + business signals (Actions "Needs attention") ----
+  computedAlerts(){ const self=this; var s=this.slices();
+    var total=this.costs.reduce(function(a,c){return a+c.amt;},0);
+    var dept={}; this.costs.forEach(function(c){ dept[c.dept]=(dept[c.dept]||0)+c.amt; });
+    var out=[];
+
+    // --- data quality: things that silently skew the numbers ---
+    var swapped=this.inventory.filter(function(p){ return p.cost>0 && p.price>0 && p.cost>p.price; });
+    if(swapped.length) out.push({sev:'neg',
+      title:swapped.length+' SKU'+(swapped.length>1?'s have':' has')+' cost above price',
+      detail:'unit_cost is larger than unit_price on these rows — almost always the two columns are swapped, which inverts margins, stock value and the P&L. e.g. '+swapped[0].name+' shows '+self.money(swapped[0].cost)+' cost vs '+self.money(swapped[0].price)+' price.',
+      meta:'Data quality · INVENTORY'});
+
+    var blankRev=this.revenue.filter(function(r){ return r.units>0 && !(r.revenue>0); });
+    if(blankRev.length) out.push({sev:'neg',
+      title:blankRev.length+' sold row'+(blankRev.length>1?'s have':' has')+' no revenue amount',
+      detail:'units_sold is filled but revenue is blank on these REVENUE rows, so earned and every sales metric is understated. Add the sale value.',
+      meta:'Data quality · REVENUE'});
+
+    var blankCost=this.inventory.filter(function(p){ return !(p.cost>0); });
+    if(blankCost.length) out.push({sev:'amber',
+      title:blankCost.length+' SKU'+(blankCost.length>1?'s are':' is')+' missing unit_cost',
+      detail:'true margin, COGS and closing-stock-at-cost need a unit_cost on every INVENTORY row.',
+      meta:'Data quality · INVENTORY'});
+
+    var seen={}; this.inventory.forEach(function(p){ if(p.sku) seen[p.sku]=(seen[p.sku]||0)+1; });
+    var dups=Object.keys(seen).filter(function(k){return seen[k]>1;});
+    if(dups.length) out.push({sev:'amber',
+      title:dups.length+' SKU code'+(dups.length>1?'s repeat':' repeats')+' across pieces',
+      detail:'e.g. '+dups[0]+' is on '+seen[dups[0]]+' rows. A SKU should be unique per piece so a sale links to the exact item — keep the family code as a prefix and add a sequence (e.g. '+dups[0]+'-01, '+dups[0]+'-02).',
+      meta:'Data quality · INVENTORY'});
+
+    // --- business signals ---
+    if(s.pieces) out.push({sev:'neg', title:s.pieces+' finished pieces unsold',
+      detail:self.money(s.stock)+' of stock tied up — turning it to cash is the whole game right now.', meta:'Inventory'});
+    if(total) out.push({sev:'neg', title:'Only '+self.pct(s.earned/total,1)+' of investment recovered',
+      detail:self.money(s.earned)+' earned against '+self.money(total)+' invested.', meta:'Cash · break-even'});
+    if(total && dept['Marketing']) out.push({sev:'amber', title:'Marketing is '+self.pct(dept['Marketing']/total)+' of all spend',
+      detail:self.money(dept['Marketing'])+' on shoots, site & ads vs '+self.money(s.earned)+' of sales to show for it so far.', meta:'Costs'});
+
+    return out;
+  }
+
 }
 var __root = ReactDOM.createRoot(document.getElementById('root'));
 __root.render(React.createElement(Dashboard));
