@@ -50,19 +50,27 @@ const CONFIG = {
 // Main entry points
 // ============================================================
 
-// GET ?mode=all            -> every table in one payload (dashboard startup)
-// GET ?mode=<sheet key>    -> one table (revenue, inventory, channels, ...)
+// GET (no params)          -> serve the dashboard app itself (hosted here)
+// GET ?mode=all            -> every table in one JSON payload
+// GET ?mode=<sheet key>    -> one table as JSON (revenue, inventory, ...)
+//
+// The dashboard, when served by this web app, reads its data through
+// google.script.run.getData() (see below) rather than fetching ?mode=all,
+// which avoids cross-origin fetch limits inside the HtmlService sandbox.
 function doGet(e) {
   try {
-    const mode = (e && e.parameter && e.parameter.mode) || 'all';
+    const mode = e && e.parameter && e.parameter.mode;
+
+    // No mode -> a person opened the web-app URL: serve the app.
+    if (!mode) {
+      return HtmlService.createHtmlOutputFromFile('App')
+        .setTitle('Balooo · Business Math')
+        .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
 
     if (mode === 'all') {
-      const brandMap = readBrandMap();
-      const payload = {};
-      Object.keys(CONFIG.SHEETS).forEach(function (key) {
-        payload[key] = withBrandNames(readSheet(CONFIG.SHEETS[key]), brandMap);
-      });
-      return createJsonResponse(payload);
+      return createJsonResponse(buildPayload());
     }
 
     if (CONFIG.SHEETS[mode]) {
@@ -74,6 +82,25 @@ function doGet(e) {
     return createErrorResponse(error.message);
   }
 }
+
+// Every table in one object — used by ?mode=all and by getData() below.
+function buildPayload() {
+  const brandMap = readBrandMap();
+  const payload = {};
+  Object.keys(CONFIG.SHEETS).forEach(function (key) {
+    payload[key] = withBrandNames(readSheet(CONFIG.SHEETS[key]), brandMap);
+  });
+  return payload;
+}
+
+// ============================================================
+// Called straight from the hosted page via google.script.run.
+// These return plain objects (google.script.run serialises them);
+// doPost still exposes the same operations as JSON for standalone hosting.
+// ============================================================
+function getData() { return buildPayload(); }
+function addAction(card) { return appendActionCard(card || {}); }
+function updateAction(id, status) { return updateActionStatus(id, status); }
 
 // POST actions:
 //   { action: 'ask', system, prompt, model }   -> Claude answer
@@ -87,10 +114,10 @@ function doPost(e) {
       return askClaude(data.system, data.prompt, data.model);
     }
     if (data.action === 'addAction') {
-      return addActionCard(data.card || {});
+      return createJsonResponse(appendActionCard(data.card || {}));
     }
     if (data.action === 'updateAction') {
-      return updateActionCard(data.id, data.status);
+      return createJsonResponse(updateActionStatus(data.id, data.status));
     }
 
     return createErrorResponse('Unknown action');
@@ -163,10 +190,12 @@ function withBrandNames(rows, brandMap) {
 // cards get stable ids; otherwise the title is used to find rows.
 // ============================================================
 
-function addActionCard(card) {
+// Returns a plain object; throws on failure (google.script.run surfaces the
+// throw to withFailureHandler, doPost's try/catch turns it into JSON error).
+function appendActionCard(card) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(CONFIG.SHEETS.alerts);
-  if (!sheet) return createErrorResponse('ALERTS sheet not found');
+  if (!sheet) throw new Error('ALERTS sheet not found');
 
   const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
     .map(function (h) { return String(h).trim().toLowerCase(); });
@@ -182,30 +211,30 @@ function addActionCard(card) {
     created: new Date().toISOString()
   };
   sheet.appendRow(headers.map(function (h) { return byHeader[h] != null ? byHeader[h] : ''; }));
-  return createJsonResponse({ success: true, id: id });
+  return { success: true, id: id };
 }
 
-function updateActionCard(id, status) {
+function updateActionStatus(id, status) {
   const ss = SpreadsheetApp.openById(CONFIG.SPREADSHEET_ID);
   const sheet = ss.getSheetByName(CONFIG.SHEETS.alerts);
-  if (!sheet) return createErrorResponse('ALERTS sheet not found');
+  if (!sheet) throw new Error('ALERTS sheet not found');
 
   const values = sheet.getDataRange().getValues();
   const headers = values[0].map(function (h) { return String(h).trim().toLowerCase(); });
   const idCol = headers.indexOf('id');
   const titleCol = headers.indexOf('title');
   const statusCol = headers.indexOf('status');
-  if (statusCol === -1) return createErrorResponse('ALERTS has no status column');
+  if (statusCol === -1) throw new Error('ALERTS has no status column');
 
   for (let i = 1; i < values.length; i++) {
     const matchesId = idCol > -1 && String(values[i][idCol]) === String(id);
     const matchesTitle = titleCol > -1 && String(values[i][titleCol]) === String(id);
     if (matchesId || matchesTitle) {
       sheet.getRange(i + 1, statusCol + 1).setValue(status);
-      return createJsonResponse({ success: true });
+      return { success: true };
     }
   }
-  return createErrorResponse('Action not found: ' + id);
+  throw new Error('Action not found: ' + id);
 }
 
 // ============================================================
